@@ -1,66 +1,230 @@
-#######################################
-# user config
 
-# Based on the ARM_ARCHITECTURE environment variable
-# Set IS_ARM to build on the Odroid board
-IF(DEFINED ENV{ARM_ARCHITECTURE})
-  MESSAGE("ARM_ARCHITECTURE environment variable set to " $ENV{ARM_ARCHITECTURE})
-  SET(IS_ARM TRUE)
-ELSE()
-  SET(IS_ARM FALSE)
-ENDIF()
+# 
+# External dependencies
+# 
+#find_package(OpenCV REQUIRED)
 
-SET(BUILD_TEST TRUE)
+# 
+# Library name and options
+# 
 
-#######################################
-SET(PROJECT_NAME fast)
-PROJECT(${PROJECT_NAME})
-CMAKE_MINIMUM_REQUIRED (VERSION 2.8.3)
-SET(CMAKE_VERBOSE_MAKEFILE ON)
+# Target name
+set(target fast)
 
-# Build type and flags
-SET(CMAKE_BUILD_TYPE Release) # Options:  Debug, RelWithDebInfo, Release
-SET(CMAKE_CXX_FLAGS "-Wall -Werror -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unknown-pragmas")
-SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g")
-IF(IS_ARM)
-  SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3 -mfpu=neon -march=armv7-a")
-ELSE()
-  SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3 -mmmx -msse -msse -msse2 -msse3 -mssse3 -fomit-frame-pointer")
-ENDIF()
+# Exit here if required dependencies are not met
+message(STATUS "Lib ${target}")
 
-# Add Sources
-SET(SOURCES  ${PROJECT_SOURCE_DIR}/src/fast_10.cpp
-             ${PROJECT_SOURCE_DIR}/src/fast_10_score.cpp
-             ${PROJECT_SOURCE_DIR}/src/nonmax_3x3.cpp)
-IF(IS_ARM)
-#  LIST(APPEND SOURCES ${PROJECT_SOURCE_DIR}/src/faster_corner_9_neon.cpp)
-ELSE()
-  LIST(APPEND SOURCES ${PROJECT_SOURCE_DIR}/src/faster_corner_10_sse.cpp)
-ENDIF()
-
-# Add library
-INCLUDE_DIRECTORIES(include src)
-ADD_LIBRARY(${PROJECT_NAME} SHARED ${SOURCES})
-
-# Add Tests
-IF(BUILD_TEST)
-  MESSAGE("Building Fast Test")
-  FIND_PACKAGE(OpenCV REQUIRED)
-  ADD_DEFINITIONS(-DTEST_DATA_DIR=\"${PROJECT_SOURCE_DIR}/test/data\")
-  ADD_EXECUTABLE(fast_test test/test.cpp)
-  TARGET_LINK_LIBRARIES(fast_test ${OpenCV_LIBS} ${PROJECT_NAME})
-ENDIF()
+# Set build flags to enable SSE or neon features
+if(${arch} STREQUAL "ARM")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfpu=neon -march=armv7-a")
+elseif(MSVC)
+  ADD_DEFINITIONS(/arch:SSE2 -D__SSE2__)
+else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mmmx -msse -msse -msse2 -msse3 -mssse3")
+endif()
 
 
-################################################################################
-# Create the fastConfig.cmake file for other cmake projects.
-GET_TARGET_PROPERTY( FULL_LIBRARY_NAME ${PROJECT_NAME} LOCATION )
-SET(fast_LIBRARIES ${FULL_LIBRARY_NAME} )
-SET(fast_LIBRARY_DIR ${PROJECT_BINARY_DIR} )
-SET(fast_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
-CONFIGURE_FILE( ${CMAKE_CURRENT_SOURCE_DIR}/fastConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/fastConfig.cmake @ONLY IMMEDIATE )
-export( PACKAGE fast )
+# Set API export file and macro
+string(TOUPPER ${target} target_upper)
+set(feature_file "include/${target}/${target}_features.h")
+set(export_file  "include/${target}/${target}_api.h")
+set(export_macro "${target_upper}_API")
 
-INSTALL(DIRECTORY include/fast DESTINATION ${CMAKE_INSTALL_PREFIX}/include FILES_MATCHING PATTERN "*.h" )
-INSTALL(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib )
+
+# 
+# Sources
+# 
+
+set(include_path "${CMAKE_CURRENT_SOURCE_DIR}/include/${target}")
+set(source_path  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+if (MSVC)
+ set(rc_file ${CMAKE_CURRENT_SOURCE_DIR}/src/${target}.rc)
+endif ()
+
+file(GLOB headers
+    "${include_path}/*.h"
+)
+
+file(GLOB sources
+    "${source_path}/fast_10.cpp"
+    "${source_path}/fast_10_score.cpp"
+    "${source_path}/nonmax_3x3.cpp"
+)
+if (${arch} STREQUAL "ARM")
+  LIST(APPEND sources ${source_path}/faster_corner_9_neon.cpp)
+else()
+  LIST(APPEND sources ${source_path}/faster_corner_10_sse.cpp)
+endif()
+
+
+# Group source files
+set(header_group "Header Files (API)")
+set(source_group "Source Files")
+source_group_by_path(${include_path} "\\\\.h$|\\\\.hpp$" 
+    ${header_group} ${headers})
+source_group_by_path(${source_path}  "\\\\.cpp$|\\\\.c$|\\\\.h$|\\\\.hpp$" 
+    ${source_group} ${sources})
+
+# 
+# Create library
+# 
+
+# Build library
+add_library(${target}
+    ${sources}
+    ${headers}
+	${rc_file} 
+)
+
+# Create namespaced alias
+add_library(${META_PROJECT_NAME}::${target} ALIAS ${target})
+
+# Export library for downstream projects
+export(TARGETS ${target} NAMESPACE ${META_PROJECT_NAME}:: FILE ${PROJECT_BINARY_DIR}/cmake/${target}/${target}-export.cmake)
+
+# Create feature detection header
+# Compilers: https://cmake.org/cmake/help/v3.1/variable/CMAKE_LANG_COMPILER_ID.html#variable:CMAKE_%3CLANG%3E_COMPILER_ID
+# Feature: https://cmake.org/cmake/help/v3.1/prop_gbl/CMAKE_CXX_KNOWN_FEATURES.html
+
+# Check for availability of module; use pre-generated version if not found
+if (WriterCompilerDetectionHeaderFound)
+    write_compiler_detection_header(
+        FILE ${feature_file}
+        PREFIX ${target_upper}
+        COMPILERS AppleClang Clang GNU MSVC
+        FEATURES cxx_alignas cxx_alignof cxx_constexpr cxx_final cxx_noexcept cxx_nullptr cxx_sizeof_member cxx_thread_local
+        VERSION 3.2
+    )
+else()
+    file(
+        COPY ${PROJECT_SOURCE_DIR}/codegeneration/${target}_features.h
+        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/include/${target}
+        USE_SOURCE_PERMISSIONS
+    )
+endif()
+
+# Create API export header
+generate_export_header(${target}
+    EXPORT_FILE_NAME  ${export_file}
+    EXPORT_MACRO_NAME ${export_macro}
+)
+
+
+# 
+# Project options
+# 
+
+set_target_properties(${target}
+    PROPERTIES
+        ${DEFAULT_PROJECT_OPTIONS}
+        FOLDER "${IDE_FOLDER}"
+)
+
+#add_definitions(-DVRPN_USE_MOTIONNODE)
+
+# 
+# Include directories
+# 
+
+target_include_directories(${target}
+    PRIVATE
+		${PROJECT_BINARY_DIR}/source/${target}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+
+    PUBLIC
+        ${DEFAULT_INCLUDE_DIRECTORIES}
+
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+
+
+# 
+# Libraries
+# 
+
+target_link_libraries(${target}
+    PRIVATE
+	
+    PUBLIC
+        ${DEFAULT_LIBRARIES}
+
+    INTERFACE
+)
+
+# 
+# Compile definitions
+# 
+
+target_compile_definitions(${target}
+    PRIVATE
+
+    PUBLIC
+        $<$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>:${target_upper}_STATIC_DEFINE>
+        ${DEFAULT_COMPILE_DEFINITIONS}
+
+    INTERFACE
+)
+
+
+# 
+# Compile options
+# 
+
+target_compile_options(${target}
+    PRIVATE
+
+    PUBLIC
+        ${DEFAULT_COMPILE_OPTIONS}
+
+    INTERFACE
+)
+
+
+# 
+# Linker options
+# 
+
+target_link_libraries(${target}
+    PRIVATE
+
+    PUBLIC
+        ${DEFAULT_LINKER_OPTIONS}
+
+    INTERFACE
+)
+
+
+# 
+# Deployment
+# 
+
+# Library
+install(TARGETS ${target}
+    EXPORT  "${target}-export"            COMPONENT dev
+    RUNTIME DESTINATION ${INSTALL_BIN}    COMPONENT runtime
+    LIBRARY DESTINATION ${INSTALL_SHARED} COMPONENT runtime
+    ARCHIVE DESTINATION ${INSTALL_LIB}    COMPONENT dev
+)
+
+# Header files
+install(DIRECTORY
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/${target} DESTINATION ${INSTALL_INCLUDE}
+    COMPONENT dev
+)
+
+# Generated header files
+install(DIRECTORY
+    ${CMAKE_CURRENT_BINARY_DIR}/include/${target} DESTINATION ${INSTALL_INCLUDE}
+    COMPONENT dev
+)
+
+# CMake config
+install(EXPORT ${target}-export
+    NAMESPACE   ${META_PROJECT_NAME}::
+    DESTINATION ${INSTALL_CMAKE}/${target}
+    COMPONENT   dev
+)
