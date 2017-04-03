@@ -70,7 +70,7 @@ source_group_by_path(${source_path}  "\\\\.cpp$|\\\\.c$|\\\\.h$|\\\\.hpp$"
 # 
 
 # Build library
-add_library(${target} #STATIC
+add_library(${target} STATIC
     ${sources}
     ${headers}
 	${rc_file} 
