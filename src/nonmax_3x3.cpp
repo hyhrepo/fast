@@ -14,7 +14,7 @@ namespace fast
 // fast_nonmax_t is templated so you can have either of:
 //      1: A vector of ImageRefs of the nonmax corners
 //      2: A vector of <ImageRef, int> pairs of the corners and their scores.
-void fast_nonmax_3x3(const std::vector<fast_xy>& corners, const std::vector<int>& scores, std::vector<int>& nonmax_corners)
+void FAST_API fast_nonmax_3x3(const std::vector<fast_xy>& corners, const std::vector<int>& scores, std::vector<int>& nonmax_corners)
 {
     nonmax_corners.clear();
     nonmax_corners.reserve(corners.size());

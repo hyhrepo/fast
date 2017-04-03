@@ -3147,7 +3147,7 @@ inline int fast_corner_score_10(const fast_byte* cache_0, const int offset[], in
         return b-1;
 }
 
-void fast_corner_score_10(
+void FAST_API fast_corner_score_10(
   const fast_byte* img,
   const int img_stride,
   const std::vector<fast_xy>& corners,

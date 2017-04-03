@@ -186,7 +186,7 @@ namespace fast
       }
   }
 
-  void fast_corner_detect_10_sse2(const fast_byte* img, int img_width, int img_height, int img_stride,
+  void FAST_API fast_corner_detect_10_sse2(const fast_byte* img, int img_width, int img_height, int img_stride,
                                   short barrier, std::vector<fast_xy>& corners)
   {
       if (img_width < 22) {
